@@ -25,13 +25,10 @@ html, body {
 /* ---------------- Stage del mapa ----------------
    El canvas se extiende debajo de la viewport para que el globo,
    centrado dentro del canvas, quede visualmente cortado abajo.
-
-   `transform` se anima cuando enfocamos una ciudad: aplicamos un
-   translateY negativo para subir TODO el stage hacia el top del
-   viewport. Como la cámara aterriza en el centro natural del
-   contenedor, mover el stage en CSS desplaza la ciudad y la esfera
-   exactamente igual en pantalla, sin depender del param `offset`
-   de MapLibre (que no se aplica bien con globo + pitch alto). */
+   Su posición es FIJA — no se mueve al hacer una búsqueda; el
+   marcador se reubica en el tope de la esfera vía coordenada
+   geográfica calculada (ver computeResultCenterForTarget +
+   CITY_LATITUDE_OFFSET en el script). */
 #map-stage {
     position: fixed;
     top: 0;
@@ -39,9 +36,6 @@ html, body {
     width: 100vw;
     height: 180vh;
     z-index: 0;
-    transform: translateY(0);
-    transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: transform;
 }
 #map {
     width: 100%;
@@ -65,11 +59,11 @@ html, body {
     justify-content: space-between;
     align-items: center;
     color: #fff;
-    background: rgba(15, 15, 20, 0.32);
+  /*  background: rgba(15, 15, 20, 0.32);
     backdrop-filter: blur(24px) saturate(160%);
     -webkit-backdrop-filter: blur(24px) saturate(160%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);*/
 }
 .brand {
     font-size: 26px;
@@ -149,6 +143,71 @@ html, body {
     .nav { display: none; }
 }
 
+/* ---------------- Hero tagline (sobre el search bar) ----------------
+   Texto de marca que aparece arriba del input con una animación
+   letter-by-letter: cada letra entra desde opacity:0 + blur + escala
+   chica, y aterriza en opacity:1, sin blur, escala 1. El stagger entre
+   letras se inyecta desde JS (animation-delay). */
+#hero-tagline {
+    position: fixed;
+    top: 22%;                       /* arriba del search bar (que está en 30%) */
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 5;
+    width: max-content;
+    max-width: min(1180px, 94vw);
+    text-align: center;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 31px;                /* 2x más grande que la primera versión */
+    font-weight: 500;
+    letter-spacing: 0.03em;
+   
+    pointer-events: none;
+    user-select: none;
+    text-shadow: 0 1px 14px rgba(0, 0, 0, 0.65);
+    white-space: nowrap;
+}
+.hero-letter {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(14px);
+    transform: scale(0.35);
+    transform-origin: center center;
+    animation: heroLetterIn 0.95s cubic-bezier(.2, .8, .25, 1) forwards;
+    will-change: opacity, filter, transform;
+}
+/* Espacios: mantenerlos como espacios reales para que el navegador
+   gestione el wrap; también necesitan tomar la animación para que el
+   ancho del bloque sea estable durante la entrada. */
+.hero-letter.space {
+    width: 0.32em;
+}
+@keyframes heroLetterIn {
+    0% {
+        opacity: 0;
+        filter: blur(14px);
+        transform: scale(0.35);
+    }
+    60% {
+        opacity: 1;
+        filter: blur(2px);
+        transform: scale(1.04);
+    }
+    100% {
+        opacity: 1;
+        filter: blur(0);
+        transform: scale(1);
+    }
+}
+@media (max-width: 720px) {
+    #hero-tagline {
+        font-size: 22px;            /* 2x respecto a la primera versión mobile */
+        letter-spacing: 0.18em;
+        white-space: normal;        /* permite wrap en mobile */
+        line-height: 1.25;
+    }
+}
+
 /* ---------------- Search UI ----------------
    Subido al tercio alto del viewport. Con cards de 450 px, esto deja
    espacio suficiente entre la barra de búsqueda y la fila de cards
@@ -163,8 +222,8 @@ html, body {
 }
 #search {
     width: 100%;
-    background: rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(22px) saturate(160%);
+    background: rgb(46 46 46 / 4%);
+    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(22px) saturate(160%);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -173,9 +232,7 @@ html, body {
     font-size: 15px;
     letter-spacing: 0.02em;
     outline: none;
-    box-shadow:
-        0 8px 40px rgba(0, 0, 0, 0.45),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  
     transition: border-color .2s, box-shadow .2s, background .2s;
 }
 #search::placeholder { color: rgba(255, 255, 255, 0.55); }
@@ -243,12 +300,13 @@ html, body {
     pointer-events: none;
 }
 
-/* Fila de flechas, alineadas a la derecha justo encima del strip.
-   Como el carrusel es infinito (siempre hay material a ambos lados),
-   las flechas viven siempre visibles. */
+/* Fila de flechas: una a cada extremo del carrusel (izquierda al
+   borde izquierdo, derecha al borde derecho), espejadas. Como el
+   carrusel es infinito (siempre hay material a ambos lados), las
+   flechas viven siempre visibles. */
 #cards-arrows {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 10px;
     padding: 0 38px;
     margin-bottom: 14px;
@@ -308,7 +366,7 @@ html, body {
 
 #cards-track {
     display: flex;
-    gap: 16px;
+    gap: 32px;
     width: max-content;
     padding: 0 38px;
     will-change: transform, scale;
@@ -320,9 +378,9 @@ html, body {
 #cards-strip.dragging #cards-track { scale: 0.96; }
 
 .workshop-card {
-    flex: 0 0 320px;
-    height: 450px;
-    border-radius: 22px;
+    flex: 0 0 352px;            /* 320 × 1.10 = 352 (10% más grande) */
+    height: 455px;              /* 450 × 1.10 = 495 */
+    border-radius: 17px;
     overflow: hidden;
     /* Background semitransparente para que la esfera se transparente
        a través de la card. El backdrop-filter blur la "esmerila" para
@@ -348,7 +406,7 @@ html, body {
 }
 .workshop-card .cover {
     position: relative;
-    height: 210px;
+    height: 231px;              /* 210 × 1.10 = 231 */
     background-size: cover;
     background-position: center;
     background-color: #222;
@@ -431,8 +489,8 @@ html, body {
     #cards-track  { padding: 0 18px; }
     #cards-arrows { padding: 0 18px; }
     #cards-area   { bottom: 5vh; }
-    .workshop-card { flex-basis: 250px; height: 360px; }
-    .workshop-card .cover { height: 170px; }
+    .workshop-card { flex-basis: 275px; height: 396px; }   /* 250→275, 360→396 (+10%) */
+    .workshop-card .cover { height: 187px; }               /* 170 × 1.10 = 187 */
     .workshop-card .body  { padding: 14px 16px 16px; gap: 8px; }
     .workshop-card .title { font-size: 15px; }
     .workshop-card .meta  { font-size: 11px; }
@@ -484,19 +542,38 @@ html, body {
     100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
 }
 
-/* ---------------- City label ---------------- */
+/* ---------------- City label ----------------
+   .city-label es el elemento del marker: MapLibre le aplica el
+   transform de posicionamiento, NO le toquemos `transform` desde CSS
+   o le saldría volado. Toda la animación (fadeUp + opacity) se hace
+   en .city-label-inner, que es un hijo "neutral". */
 .city-label {
-    color: #fff;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    text-shadow: 0 0 12px rgba(255, 220, 150, 0.9), 0 0 4px rgba(0, 0, 0, 0.9);
-    white-space: nowrap;
+    text-align: center;
     pointer-events: none;
+    white-space: nowrap;
+    text-shadow: 0 0 12px rgba(255, 220, 150, 0.9), 0 0 4px rgba(0, 0, 0, 0.9);
+}
+.city-label-inner {
     opacity: 0;
     transform: translateY(6px);
     animation: fadeUp .8s ease .4s forwards;
+}
+.city-label .city-name {
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    line-height: 1;
+}
+.city-label .country-name {
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.30em;
+    text-transform: uppercase;
+    line-height: 1;
 }
 @keyframes fadeUp {
     to { opacity: 1; transform: translateY(0); }
@@ -584,10 +661,14 @@ html, body {
     </div>
 </header>
 
+<div id="hero-tagline" aria-hidden="true"></div>
+
 <div id="search-wrap">
-    <input id="search" type="text" placeholder="Search a city…" autocomplete="off">
+    <div id="search-border">
+        <input id="search" type="text" placeholder="Search a city…" autocomplete="off">
+    </div>
     <div id="suggestions"></div>
-</div>
+</div>  
 
 <div id="cards-area">
     <div id="cards-arrows">
@@ -787,8 +868,10 @@ html, body {
      */
     function updateStripLayout() {
         const isMobile  = window.innerWidth <= 900;
-        const cardWidth = isMobile ? 250 : 320;
-        const gap       = 16;
+        // Estos valores DEBEN coincidir con el CSS:
+        //   .workshop-card { flex-basis: ... }  +  #cards-track { gap: ... }
+        const cardWidth = isMobile ? 275 : 352;
+        const gap       = 32;
         stripSingleSetWidth = stripCardsCount * (cardWidth + gap);
     }
 
@@ -870,11 +953,46 @@ html, body {
     const DEFAULT_PITCH   = 10;
     const DEFAULT_BEARING = 0;
 
-    // Pose al ejecutar una búsqueda: zoom claro de "vista de ciudad" y
-    // pitch más cinematográfico. Distinto del default para que el flyTo
-    // se sienta como una transición real, no un simple paneo.
-    const RESULT_ZOOM     = 5;
-    const RESULT_PITCH    = 65;
+    // Pose al ejecutar una búsqueda: la esfera queda EXACTAMENTE igual
+    // que al cargar la página. Mismo zoom y mismo pitch que el default;
+    // lo único que cambia es el centro geográfico (corrimiento al sur
+    // del marcador) para que la ciudad aterrice arriba de la esfera.
+    const RESULT_ZOOM     = DEFAULT_ZOOM;
+    const RESULT_PITCH    = DEFAULT_PITCH;
+
+    // ---------------- Posicionamiento del resultado ----------------
+    //
+    //  Cuando el usuario busca una ciudad, queremos que SIEMPRE termine
+    //  en el mismo lugar de la pantalla — sin importar si es Berlín,
+    //  Buenos Aires, Reikiavik, Sídney o El Cairo. Y con la esfera
+    //  exactamente del mismo tamaño y en la misma posición que al cargar.
+    //
+    //  El truco: usar un offset ANGULAR en grados de latitud — el centro
+    //  de la cámara se ubica `CITY_LATITUDE_OFFSET` grados al SUR de la
+    //  ciudad. En proyección globo (que MapLibre maneja con un proyector
+    //  cercano al ortográfico), una diferencia angular fija entre dos
+    //  latitudes se traduce SIEMPRE a la misma distancia en pantalla —
+    //  independientemente de si la ciudad está en el norte o el sur, en
+    //  el ecuador o cerca de los polos.
+    //
+    //  ¿Por qué no calcular el centro con unproject sobre el píxel
+    //  destino del viewport (más "exacto" en teoría)?
+    //    Probado y descartado: para ciudades suficientemente lejanas del
+    //    centro por defecto (caso típico Buenos Aires), el "píxel espejo"
+    //    que necesitamos unprojectar cae FUERA de la silueta visible del
+    //    globo, en el espacio negro alrededor. MapLibre en ese caso
+    //    devuelve coordenadas basura cerca de un polo — el cálculo pasa
+    //    cualquier validación numérica pero geográficamente es inútil, y
+    //    la cámara termina apuntando al polo sur (o un punto raro), con
+    //    la esfera viéndose completamente distinta. El offset angular
+    //    fijo evita ese problema por completo: no depende de la geometría
+    //    visible del canvas, sólo del modelo angular del globo.
+    //
+    //  Perilla:
+    //    ↑ valor mayor → marcador más cerca del borde superior
+    //    ↓ valor menor → marcador más cerca del centro de la esfera
+    //  Depende del zoom: si subís RESULT_ZOOM, bajalo (y viceversa).
+    const CITY_LATITUDE_OFFSET = 15;
 
     const map = new maplibregl.Map({
         container: 'map',
@@ -897,40 +1015,38 @@ html, body {
         dragPan: { deceleration: 99999 }
     });
 
-    // Umbral para mostrar las etiquetas del estilo. Está calibrado por
-    // debajo de DEFAULT_ZOOM (1.7) para que las etiquetas YA aparezcan
-    // a la pose inicial — momento en que la esfera está lo suficientemente
-    // grande como para empezar a cortarse con el viewport. Si el usuario
-    // alejara la cámara hasta ver el globo entero, las etiquetas
-    // desaparecerían (vista "macro" sin texto).
-    const LABEL_ZOOM_THRESHOLD = 1.4;
+    // La esfera no muestra NINGÚN texto del estilo (ni países, ni ciudades,
+    // ni calles, ni POIs). El único texto que aparece es el marcador
+    // dinámico que renderizamos al buscar una ciudad (city + country).
 
-    // En el mapa SOLO queremos ver nombres de país y ciudad. Cualquier otra
-    // etiqueta (calles, POIs, ríos, estados/provincias, etc.) se oculta de
-    // forma permanente. Filtramos los ids de capas symbol por substring:
-    // OpenMapTiles (la base del estilo dark de OpenFreeMap) nombra las
-    // capas como `place_country`, `place_city`, `place_capital_city`, etc.
-    const ALLOWED_LABEL_PATTERNS = ['country', 'city'];
-
-    let allowedLabelLayerIds = [];     // capas país/ciudad (toggleables)
-    let labelsVisible = false;
+    // ============================================================
+    //  Cálculo del centro de cámara para una búsqueda
+    // ============================================================
+    //  Dado un `target` (lng, lat), devuelve el centro de cámara que hay
+    //  que pasar al easeTo para que el target aterrice en el "tope" de la
+    //  esfera (~11% desde arriba en el viewport, calibrado con el zoom y
+    //  pitch por defecto).
+    //
+    //  Es deliberadamente simple: offset angular en latitud. Sin unproject,
+    //  sin estados temporales, sin dependencia de la geometría visible del
+    //  canvas. En proyección globo, este offset SIEMPRE se traduce a la
+    //  misma distancia en pantalla para cualquier ciudad — Berlín y
+    //  Buenos Aires aterrizan en el mismo Y.
+    //
+    //  Si más adelante se cambia RESULT_ZOOM o se quiere otra posición
+    //  en el viewport, sólo se toca `CITY_LATITUDE_OFFSET`.
+    function computeResultCenterForTarget(target) {
+        return [target[0], target[1] - CITY_LATITUDE_OFFSET];
+    }
 
     map.on('load', () => {
         map.setProjection({ type: 'globe' });
 
-        // Recolecto sólo las capas symbol que correspondan a país/ciudad.
-        // El resto (calles, POIs, agua, estados, etc.) lo voy a dejar
-        // ocultas para siempre.
-        const symbolLayers = map.getStyle().layers.filter(l => l.type === 'symbol');
-        const isAllowed = (id) => {
-            const lower = id.toLowerCase();
-            return ALLOWED_LABEL_PATTERNS.some(p => lower.includes(p));
-        };
-        allowedLabelLayerIds = symbolLayers.filter(l => isAllowed(l.id)).map(l => l.id);
-
-        // Ocultamos TODAS las capas symbol al cargar. Las allowed
-        // (país/ciudad) se re-mostrarán cuando el zoom cruce el umbral.
-        symbolLayers.forEach(l => map.setLayoutProperty(l.id, 'visibility', 'none'));
+        // Ocultamos TODAS las capas de tipo symbol del estilo,
+        // permanentemente — no se re-muestran a ningún zoom.
+        map.getStyle().layers
+            .filter(l => l.type === 'symbol')
+            .forEach(l => map.setLayoutProperty(l.id, 'visibility', 'none'));
 
         // Atmósfera / espacio negro
         map.setSky({
@@ -941,17 +1057,6 @@ html, body {
             'horizon-fog-blend': 0.1,
             'fog-ground-blend': 0.0,
             'atmosphere-blend': 0.5
-        });
-    });
-
-    // Mostrar / ocultar etiquetas según el zoom. Sólo afectamos a las
-    // capas allowed (país/ciudad). El resto está oculto permanentemente.
-    map.on('zoom', () => {
-        const shouldShow = map.getZoom() >= LABEL_ZOOM_THRESHOLD;
-        if (shouldShow === labelsVisible) return;
-        labelsVisible = shouldShow;
-        allowedLabelLayerIds.forEach(id => {
-            map.setLayoutProperty(id, 'visibility', shouldShow ? 'visible' : 'none');
         });
     });
 
@@ -1187,49 +1292,24 @@ html, body {
         if (!e.target.closest('#search-wrap')) suggestions.style.display = 'none';
     });
 
-    // ---------------- Resultado: vuelo + luz + label ----------------
+    // ---------------- Resultado: rotación + luz + label ----------------
     //
-    //  Al enfocar una ciudad NO queremos que aterrice en el centro del
-    //  #map-stage (que es mucho más alto que el viewport, así que el
-    //  centro cae por debajo de la mitad visible). Queremos que la
-    //  ciudad suba cerca del top del viewport.
+    //  La búsqueda hace un `easeTo` (NO un flyTo): misma pose visual que
+    //  el estado por defecto — mismo zoom y mismo pitch — y la cámara
+    //  rota suavemente hasta una coordenada calculada para que la ciudad
+    //  aterrice SIEMPRE en el mismo punto de la pantalla. Como zoom y
+    //  pitch finales son IGUALES a los actuales, easeTo los mantiene
+    //  constantes durante toda la animación: la esfera ni se achica ni
+    //  se agranda ni se desplaza — sólo rota para mostrar la ciudad
+    //  arriba. Que es exactamente lo que se ve al cargar la página,
+    //  apenas con otro contenido visible.
     //
-    //  IMPORTANTE: probamos antes con el parámetro `offset` de flyTo y NO
-    //  funciona con la combinación globo + pitch alto que usamos (es un
-    //  comportamiento conocido de MapLibre). En su lugar movemos el stage
-    //  entero con `transform: translateY()` en CSS, y dejamos que la
-    //  cámara aterrice en su centro natural. Como mover el stage es
-    //  puramente visual, la ciudad termina exactamente donde calculamos
-    //  en el viewport.
+    //  El cálculo del centro se delega a `computeResultCenterForTarget`,
+    //  que devuelve `[target_lng, target_lat - CITY_LATITUDE_OFFSET]`:
+    //  un offset angular en latitud que en globo se traduce a una
+    //  distancia constante en pantalla para cualquier ciudad.
     //
-    //  Para ajustar dónde aterriza la ciudad, sólo cambiá la fracción de
-    //  abajo. Es la posición vertical deseada en fracción del viewport:
-    //    0.10 → muy cerca del top
-    //    0.15 → cerca del top (separación ~15% del viewport)
-    //    0.30 → a la altura del search bar
-    //    0.50 → centrada verticalmente
-    const CITY_TARGET_Y_FRACTION = 0.15;
-    const mapStageEl  = document.getElementById('map-stage');
-    const searchWrapEl = document.getElementById('search-wrap');
-
-    function applyCityStageShift() {
-        const vh = window.innerHeight;
-        // Usamos offsetHeight (altura INTRÍNSECA, sin considerar el
-        // transform actual) en vez de getBoundingClientRect, porque al
-        // hacer un segundo search la transición anterior aún está en
-        // curso y el rect devolvería una posición mid-animation,
-        // produciendo un shift incorrecto. offsetHeight es estable.
-        // Como #map-stage está fijo en top:0, su centro natural es
-        // simplemente la mitad de su alto.
-        const stageHeight = mapStageEl.offsetHeight;
-        const mapCenterY  = stageHeight / 2;
-        const targetY     = vh * CITY_TARGET_Y_FRACTION;
-        const shift       = mapCenterY - targetY;         // px a subir el stage
-        mapStageEl.style.transform = `translateY(${-shift}px)`;
-    }
-    function clearCityStageShift() {
-        mapStageEl.style.transform = 'translateY(0)';
-    }
+    //  Ver constantes: CITY_LATITUDE_OFFSET, RESULT_ZOOM, RESULT_PITCH.
 
     function selectCity(name) {
         const city = cities.find(c => c.name === name);
@@ -1251,22 +1331,45 @@ html, body {
         // si no entran en el viewport).
         renderCards(buildCardsForCity(city.name));
 
-        // Bearing aleatorio sutil para que cada búsqueda se sienta distinta
-        const bearing = (Math.random() - 0.5) * 60;
+        // Bearing fijo en 0 (norte arriba) para garantizar que la ciudad
+        // quede HORIZONTALMENTE CENTRADA. Si rotáramos el bearing, el
+        // marcador se desplazaría hacia los lados.
+        const bearing = 0;
 
-        // Subimos el #map-stage vía CSS para que la ciudad (que aterriza
-        // en el centro natural del contenedor) quede cerca del top del
-        // viewport. Ver applyCityStageShift().
-        applyCityStageShift();
+        // El marcador (`target`) se queda en su coordenada real. El
+        // CENTRO del mapa se calcula con un offset angular en latitud
+        // (ver `computeResultCenterForTarget`), que en proyección globo
+        // se traduce a una distancia consistente en pantalla para
+        // CUALQUIER ciudad — sin importar latitud (norte/sur/cerca de
+        // polos) ni la geometría visible del canvas.
+        const mapCenter = computeResultCenterForTarget(target);
 
         mapAnimating = true;
-        map.flyTo({
-            center: target,
+        // ¿Por qué easeTo y no flyTo?
+        //   flyTo simula un "vuelo de avión": durante el medio del trayecto
+        //   sube el camera por encima del globo (zoom out) y después
+        //   desciende al destino (zoom in). Para una ciudad cercana al
+        //   centro por defecto (ej. Berlín) eso casi no se nota, pero para
+        //   destinos lejanos (Buenos Aires, Sídney, etc.) la esfera se
+        //   achica drásticamente a mitad de la animación y reaparece
+        //   grande al final — daba la sensación de que "el zoom y el
+        //   tamaño cambiaban" y de que la esfera "se salía del viewport".
+        //
+        //   easeTo interpola directamente entre estado actual y destino,
+        //   sin esa "altitud intermedia". Como el zoom y el pitch finales
+        //   son los mismos que los actuales, easeTo los mantiene
+        //   CONSTANTES durante toda la animación → la esfera no cambia
+        //   de tamaño ni de posición, sólo rota para que la ciudad quede
+        //   arriba. Que es exactamente lo que se pidió.
+        //
+        //   Duración fija para que la animación se sienta igual sin
+        //   importar la distancia (cerca o lejos → mismo tiempo).
+        map.easeTo({
+            center: mapCenter,
             zoom: RESULT_ZOOM,
             pitch: RESULT_PITCH,
             bearing: bearing,
-            speed: 0.55,
-            curve: 1.6,
+            duration: 1500,
             essential: true
         });
 
@@ -1283,7 +1386,17 @@ html, body {
 
             const labelEl = document.createElement('div');
             labelEl.className = 'city-label';
-            labelEl.textContent = city.name;
+            // IMPORTANTE: la animación de fadeUp se aplica a un .city-label-inner
+            // y NO al elemento raíz del marker. MapLibre setea `transform` en la
+            // raíz para posicionarlo en lat/lng; si la keyframe también animara
+            // `transform` en la raíz, lo sobrescribiría y el label volaría al
+            // top-left del contenedor.
+            labelEl.innerHTML = `
+                <div class="city-label-inner">
+                    <div class="city-name">${city.name}</div>
+                    <div class="country-name">${city.country}</div>
+                </div>
+            `;
             const labelMarker = new maplibregl.Marker({
                 element: labelEl,
                 anchor: 'top',
@@ -1312,10 +1425,6 @@ html, body {
 
             // Restauramos un set aleatorio fresco para el carrusel infinito.
             renderCards(buildRandomCards(RANDOM_INITIAL_CARDS));
-
-            // Devolvemos el stage a su posición natural (animado por la
-            // transición CSS de #map-stage).
-            clearCityStageShift();
 
             // Reset al estado inicial EXACTO con el que abre la página
             currentSpinSpeed = degreesPerSecond;
@@ -1349,6 +1458,31 @@ html, body {
     //  ciudad (también en loop). Al cerrar el resultado se vuelve a generar
     //  un set aleatorio nuevo, así no es siempre exactamente el mismo.
     renderCards(buildRandomCards(RANDOM_INITIAL_CARDS));
+
+    // ---------------- Hero tagline (entrada letter-by-letter) ----------------
+    //  Generamos un <span> por carácter (los espacios se renderizan como
+    //  spans vacíos con clase .space para mantener el ancho). Cada span
+    //  recibe un `animation-delay` escalonado para que las letras entren
+    //  una detrás de la otra (efecto stagger). El keyframe heroLetterIn
+    //  hace el trabajo visual: opacity 0→1, blur 14px→0, scale 0.35→1
+    //  con un pequeño overshoot a 1.04 antes de aterrizar.
+    (function injectHeroTagline() {
+        const HERO_TEXT = 'Create with artist in they private studio worldwide';
+        const HERO_STAGGER_MS = 38;     // ms entre el inicio de letra y letra
+        const HERO_INITIAL_DELAY_MS = 250;
+
+        const host = document.getElementById('hero-tagline');
+        if (!host) return;
+
+        const chars = Array.from(HERO_TEXT);
+        host.innerHTML = chars.map((ch, i) => {
+            const isSpace = ch === ' ';
+            const delay = (HERO_INITIAL_DELAY_MS + i * HERO_STAGGER_MS) / 1000;
+            const cls = 'hero-letter' + (isSpace ? ' space' : '');
+            const content = isSpace ? '' : ch;
+            return `<span class="${cls}" style="animation-delay:${delay.toFixed(3)}s">${content}</span>`;
+        }).join('');
+    })();
 
     // ---------------- Drag del strip (con inercia + elastic press/release) -------
     //  • Al apretar: clase .dragging → el track se escala a 0.96 con easing
