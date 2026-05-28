@@ -18,9 +18,17 @@ html, body {
     margin: 0;
     padding: 0;
     background: var(--bg);
-    overflow: hidden;
+    /* La página es scrolleable verticalmente (ver #scroll-spacer + el
+       sistema SCROLL-DRIVEN PARALLAX en JS). Ocultamos la scrollbar
+       para mantener la estética minimalista, sin perder la capacidad
+       de scroll en mouse/trackpad/touch. */
+    scrollbar-width: none;            /* Firefox */
+    -ms-overflow-style: none;         /* IE / legacy Edge */
+    overscroll-behavior: none;        /* sin rubber-band ni pull-to-refresh */
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+html::-webkit-scrollbar,
+body::-webkit-scrollbar { display: none; }   /* Chrome / Safari / WebKit */
 
 /* ---------------- Stage del mapa ----------------
    El canvas se extiende debajo de la viewport para que el globo,
@@ -36,6 +44,25 @@ html, body {
     width: 100vw;
     height: 180vh;
     z-index: 0;
+    /* Tres CSS vars que JS actualiza por frame y componen el
+       transform del stage según la fase de scroll:
+         translate3d(--sphere-tx, --sphere-ty, 0)  ← fase 1: baja/derecha
+                                                     (hasta t2 = 0.5)
+         scale(--sphere-scale)                      ← fase 1 encoge;
+                                                     fase 2 crece +5% y fija;
+                                                     fase 3 scroll conjunto
+       transform-origin: center → la esfera escala alrededor de su
+       posición trasladada. El canvas y todos los markers son hijos
+       del stage, por lo que el bloque entero se mueve y escala como
+       una sola unidad rígida (la pose interna del mapa no cambia).
+       will-change reserva una capa de compositor → sin reflow. */
+    will-change: transform;
+    --sphere-tx: 0px;
+    --sphere-ty: 0px;
+    --sphere-scale: 1;
+    transform-origin: center center;
+    transform: translate3d(var(--sphere-tx), var(--sphere-ty), 0)
+               scale(var(--sphere-scale));
 }
 #map {
     width: 100%;
@@ -59,36 +86,48 @@ html, body {
     justify-content: space-between;
     align-items: center;
     color: #fff;
-  /*  background: rgba(15, 15, 20, 0.32);
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 0px solid transparent;
+    box-shadow: none;
+    transition:
+        background 0.28s ease,
+        padding 0.28s ease,
+        border-color 0.28s ease,
+        box-shadow 0.28s ease,
+        backdrop-filter 0.28s ease;
+}
+.header.is-scrolled {
+    padding: 15px 38px;
+    background: rgba(15, 15, 20, 0.32);
     backdrop-filter: blur(24px) saturate(160%);
     -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);*/
+    border-bottom-color: rgba(255, 255, 255, 0.10);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.header .brand {
+    transition: transform 0.28s ease;
+    transform-origin: left center;
+}
+.header.is-scrolled .brand {
+    transform: scale(0.92);
 }
 .brand {
-    font-size: 26px;
-    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
     user-select: none;
-    cursor: default;
 }
-.brand-light {
-    font-weight: 300;
-    color: #fff;
+.brand-logo {
+    display: block;
+    height: 38px;
+    width: auto;
+    max-width: min(220px, 42vw);
+    object-fit: contain;
+    transition: height 0.28s ease, transform 0.28s ease;
 }
-.brand-metal {
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    background: linear-gradient(180deg,
-        #ffffff 0%,
-        #d8d8d8 38%,
-        #ffffff 52%,
-        #8e8e8e 80%,
-        #d0d0d0 100%);
-    -webkit-background-clip: text;
-            background-clip: text;
-    -webkit-text-fill-color: transparent;
-    color: transparent;
-    text-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+.header.is-scrolled .brand-logo {
+    height: 32px;
 }
 .nav-and-icons {
     display: flex;
@@ -143,29 +182,50 @@ html, body {
     .nav { display: none; }
 }
 
-/* ---------------- Hero tagline (sobre el search bar) ----------------
-   Texto de marca que aparece arriba del input con una animación
-   letter-by-letter: cada letra entra desde opacity:0 + blur + escala
-   chica, y aterriza en opacity:1, sin blur, escala 1. El stagger entre
-   letras se inyecta desde JS (animation-delay). */
-#hero-tagline {
+/* ---------------- Contenedor unificado para organizar el texto y el buscador ----------------
+   Anclado justo encima de las primeras tarjetas independientes de la altura de pantalla.
+   Maneja de forma rígida la estructura: Texto arriba, buscador abajo. */
+#home-hero-container {
     position: fixed;
-    top: 22%;                       /* arriba del search bar (que está en 30%) */
     left: 50%;
-    transform: translate(-50%, -50%);
+    bottom: calc(6vh + 499px + 56px + 24px);
+    --scroll-offset: 0px;
+    --home-opacity: 1;
+    transform: translateX(-50%) translateY(var(--scroll-offset));
+    opacity: var(--home-opacity);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
     z-index: 5;
+    width: min(1180px, 94vw);
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+/* ---------------- Hero tagline ---------------- */
+#hero-tagline {
     width: max-content;
-    max-width: min(1180px, 94vw);
+    max-width: 100%;
     text-align: center;
     color: rgba(255, 255, 255, 0.92);
-    font-size: 31px;                /* 2x más grande que la primera versión */
+    font-size: 31px;
     font-weight: 500;
     letter-spacing: 0.03em;
-   
-    pointer-events: none;
     user-select: none;
     text-shadow: 0 1px 14px rgba(0, 0, 0, 0.65);
     white-space: nowrap;
+}
+/* Título del panel (misma animación letter-by-letter que el hero) */
+#filter-panel-title {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.25;
+    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+    margin: 0;
 }
 .hero-letter {
     display: inline-block;
@@ -176,9 +236,6 @@ html, body {
     animation: heroLetterIn 0.95s cubic-bezier(.2, .8, .25, 1) forwards;
     will-change: opacity, filter, transform;
 }
-/* Espacios: mantenerlos como espacios reales para que el navegador
-   gestione el wrap; también necesitan tomar la animación para que el
-   ancho del bloque sea estable durante la entrada. */
 .hero-letter.space {
     width: 0.32em;
 }
@@ -199,32 +256,18 @@ html, body {
         transform: scale(1);
     }
 }
-@media (max-width: 720px) {
-    #hero-tagline {
-        font-size: 22px;            /* 2x respecto a la primera versión mobile */
-        letter-spacing: 0.18em;
-        white-space: normal;        /* permite wrap en mobile */
-        line-height: 1.25;
-    }
-}
 
-/* ---------------- Search UI ----------------
-   Subido al tercio alto del viewport. Con cards de 450 px, esto deja
-   espacio suficiente entre la barra de búsqueda y la fila de cards
-   (que ahora ocupa más alto del viewport). */
+/* ---------------- Search UI principal ---------------- */
 #search-wrap {
-    position: fixed;
-    top: 30%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 5;
+    position: relative;
     width: min(540px, 90vw);
+    pointer-events: auto;
 }
 #search {
     width: 100%;
-    background: rgb(46 46 46 / 4%);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    background: rgba(15, 15, 20, 0.42);
+    backdrop-filter: blur(32px) saturate(160%);
+    -webkit-backdrop-filter: blur(31px) ;
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 999px;
@@ -232,7 +275,6 @@ html, body {
     font-size: 15px;
     letter-spacing: 0.02em;
     outline: none;
-  
     transition: border-color .2s, box-shadow .2s, background .2s;
 }
 #search::placeholder { color: rgba(255, 255, 255, 0.55); }
@@ -243,9 +285,10 @@ html, body {
         0 8px 40px rgba(0, 0, 0, 0.55),
         0 0 30px rgba(255, 233, 168, 0.18);
 }
+
 /* Suggestions: posicionado en absoluto para no empujar las cards
    cuando aparece la lista debajo del input. */
-#suggestions {
+   #suggestions, #filter-suggestions {
     position: absolute;
     top: 100%;
     left: 0;
@@ -254,7 +297,7 @@ html, body {
     background: rgba(15, 15, 20, 0.55);
     backdrop-filter: blur(22px) saturate(160%);
     -webkit-backdrop-filter: blur(22px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: none;
     border-radius: 18px;
     overflow: hidden;
     max-height: 320px;
@@ -262,6 +305,7 @@ html, body {
     display: none;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55);
 }
+
 .suggestion {
     padding: 10px 18px;
     color: #fff;
@@ -298,6 +342,11 @@ html, body {
     bottom: 6vh;
     z-index: 4;
     pointer-events: none;
+    /* --scroll-offset la actualiza JS: cards suben suavemente con el
+       scroll (parallax factor < hero). */
+    --scroll-offset: 0px;
+    transform: translate3d(0, var(--scroll-offset), 0);
+    will-change: transform;
 }
 
 /* Fila de flechas: una a cada extremo del carrusel (izquierda al
@@ -345,16 +394,7 @@ html, body {
     stroke-linejoin: round;
 }
 
-/* Strip horizontal de tarjetas (carrusel infinito):
-   - #cards-strip es la "ventana" con overflow oculto que recorta lo que
-     sobresale por izquierda/derecha. Su cursor por defecto es grab porque
-     siempre hay loop (duplicamos el track) → siempre se puede arrastrar.
-   - #cards-track es la fila real con todas las cards. Lo movemos con
-     translateX desde JS (sin transición CSS) para auto-scroll continuo
-     contra el sentido de la esfera + drag con inercia.
-   - El "elástico" al presionar/soltar se hace animando la propiedad CSS
-     `scale` del track (independiente del transform) con easing tipo
-     spring (cubic-bezier con overshoot). De ahí el efecto "elastic". */
+/* Strip horizontal de tarjetas (carrusel infinito) */
 #cards-strip {
     pointer-events: auto;
     width: 100%;
@@ -489,12 +529,22 @@ html, body {
     #cards-track  { padding: 0 18px; }
     #cards-arrows { padding: 0 18px; }
     #cards-area   { bottom: 5vh; }
+    #home-hero-container { bottom: calc(5vh + 396px + 56px + 20px); gap: 16px; }
     .workshop-card { flex-basis: 275px; height: 396px; }   /* 250→275, 360→396 (+10%) */
     .workshop-card .cover { height: 187px; }               /* 170 × 1.10 = 187 */
     .workshop-card .body  { padding: 14px 16px 16px; gap: 8px; }
     .workshop-card .title { font-size: 15px; }
     .workshop-card .meta  { font-size: 11px; }
     .workshop-card .price { font-size: 16px; }
+}
+
+@media (max-width: 720px) {
+    #hero-tagline {
+        font-size: 22px;
+        letter-spacing: 0.18em;
+        white-space: normal;
+        line-height: 1.25;
+    }
 }
 
 /* ---------------- Glow marker ---------------- */
@@ -542,11 +592,7 @@ html, body {
     100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
 }
 
-/* ---------------- City label ----------------
-   .city-label es el elemento del marker: MapLibre le aplica el
-   transform de posicionamiento, NO le toquemos `transform` desde CSS
-   o le saldría volado. Toda la animación (fadeUp + opacity) se hace
-   en .city-label-inner, que es un hijo "neutral". */
+/* ---------------- City label ---------------- */
 .city-label {
     text-align: center;
     pointer-events: none;
@@ -579,11 +625,252 @@ html, body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* ---------------- Oculto cualquier control nativo de atribución ---------------- */
+/* ---------------- Filter panel (fase 2 / 3) ----------------
+   Centrado en la mitad izquierda del viewport; más alto y ancho. */
+#filter-panel {
+    position: fixed;
+    top: 50%;
+    left: 25vw;
+    width: min(40vw, 500px);
+    z-index: 6;
+    --scroll-offset: 0px;
+    transform: translate(-50%, calc(-50% + var(--scroll-offset)));
+    will-change: transform, opacity;
+    --filter-opacity: 0;
+    opacity: var(--filter-opacity);
+    pointer-events: none;
+
+    padding: 32px 28px 28px;
+    background: rgba(15, 15, 20, 0.42);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 22px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    color: #fff;
+
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 22px;
+}
+#filter-panel.is-active .filter-search-wrap,
+#filter-panel.is-active .filter-buttons {
+    pointer-events: auto;
+}
+.filter-search {
+    width: 100%;
+    background: rgba(46, 46, 46, 0.04);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    padding: 14px 22px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s, background .15s;
+}
+.filter-search::placeholder { color: rgba(255, 255, 255, 0.45); }
+.filter-search:focus {
+    border-color: rgba(255, 233, 168, 0.45);
+    background: rgba(46, 46, 46, 0.10);
+}
+.filter-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+.filter-buttons button {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .15s, color .15s, border-color .15s, transform .15s;
+}
+.filter-buttons button:hover {
+    background: rgba(255, 233, 168, 0.10);
+    color: var(--accent);
+    border-color: rgba(255, 233, 168, 0.40);
+    transform: translateY(-1px);
+}
+.filter-buttons button:active { transform: translateY(0) scale(0.98); }
+
+@media (max-width: 720px) {
+    #filter-panel {
+        left: 50%;
+        width: min(92vw, 500px);
+        padding: 24px 18px 20px;
+    }
+    #filter-panel-title { font-size: 18px; }
+}
+
+/* ---------------- Result cards (bajo el panel, post-búsqueda) ----------------
+   Cards compactas: imagen a tamaño real + datos superpuestos + precio abajo. */
+#result-cards-area {
+    position: fixed;
+    left: 25vw;
+    top: calc(50% + 210px);
+    width: min(calc(2 * 168px + 20px), 40vw);
+    z-index: 6;
+    --scroll-offset: 0px;
+    --result-opacity: 0;
+    opacity: var(--result-opacity);
+    transform: translate(-50%, var(--scroll-offset));
+    will-change: transform, opacity;
+    pointer-events: none;
+}
+#result-cards-area.is-interactive {
+    pointer-events: auto;
+}
+#result-cards-arrows {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+#result-cards-arrows .arrow-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+#result-cards-strip {
+    overflow: hidden;
+    width: 100%;
+}
+#result-cards-track {
+    display: flex;
+    gap: 20px;
+    width: max-content;
+    will-change: transform;
+    transition: transform 0.38s cubic-bezier(.2, .8, .25, 1);
+}
+.result-card {
+    flex: 0 0 168px;
+    width: 168px;
+    height: 224px;
+    border-radius: 14px;
+    overflow: hidden;
+    position: relative;
+    cursor: default;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.result-card-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-color: #222;
+}
+.result-card-image::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        180deg,
+        rgba(0, 0, 0, 0.15) 0%,
+        rgba(0, 0, 0, 0.05) 35%,
+        rgba(0, 0, 0, 0.55) 72%,
+        rgba(0, 0, 0, 0.82) 100%
+    );
+}
+.result-card-tag {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 1;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(6px);
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.result-card-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    padding: 10px 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.result-card-title {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: #fff;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.result-card-meta {
+    margin: 0;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.65);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.result-card-price {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.01em;
+}
+@media (max-width: 900px) {
+    #result-cards-area {
+        width: min(calc(2 * 148px + 16px), 88vw);
+        top: calc(50% + 190px);
+    }
+    .result-card {
+        flex-basis: 148px;
+        width: 148px;
+        height: 198px;
+    }
+}
+@media (max-width: 720px) {
+    #result-cards-area {
+        left: 50%;
+        width: min(calc(2 * 140px + 14px), 92vw);
+    }
+    .result-card {
+        flex-basis: 140px;
+        width: 140px;
+        height: 186px;
+    }
+}
+
+/* ---------------- Corrección y Limpieza de cascada ---------------- */
+.filter-search-wrap {
+    position: relative;
+}
+
+#scroll-spacer {
+    width: 100%;
+    pointer-events: none;
+    visibility: hidden;
+}
+
 .maplibregl-ctrl-attrib,
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib { display: none !important; }
 
-/* ---------------- Atribución custom: solo un círculo con "i" ---------------- */
 #attr-btn {
     position: absolute;
     bottom: 12px;
@@ -638,7 +925,7 @@ html, body {
 
 <header class="header">
     <div class="brand">
-        <span class="brand-light">Workshops</span><span class="brand-metal">TOURS</span>
+        <img class="brand-logo" src="logo_subcultours.webp" alt="Subcultours">
     </div>
 
     <div class="nav-and-icons">
@@ -661,14 +948,17 @@ html, body {
     </div>
 </header>
 
-<div id="hero-tagline" aria-hidden="true"></div>
+<!-- CONTENEDOR UNIFICADO: Asegura el orden jerárquico y evita desbordamientos del viewport -->
+<div id="home-hero-container">
+    <div id="hero-tagline" aria-hidden="true"></div>
 
-<div id="search-wrap">
-    <div id="search-border">
-        <input id="search" type="text" placeholder="Search a city…" autocomplete="off">
-    </div>
-    <div id="suggestions"></div>
-</div>  
+    <div id="search-wrap">
+        <div id="search-border">
+            <input id="search" type="text" placeholder="Search a city…" autocomplete="off">
+        </div>
+        <div id="suggestions"></div>
+    </div>  
+</div>
 
 <div id="cards-area">
     <div id="cards-arrows">
@@ -681,6 +971,34 @@ html, body {
     </div>
     <div id="cards-strip">
         <div id="cards-track"></div>
+    </div>
+</div>
+
+<div id="filter-panel" aria-hidden="true">
+    <h2 id="filter-panel-title" aria-hidden="true"></h2>
+    <div class="filter-search-wrap">
+        <input class="filter-search" type="text" placeholder="Search a city…" autocomplete="off">
+        <div id="filter-suggestions"></div>
+    </div>
+    <div class="filter-buttons">
+        <button type="button">Precio</button>
+        <button type="button">Personas</button>
+        <button type="button">Tiempo</button>
+        <button type="button">Día</button>
+    </div>
+</div>
+
+<div id="result-cards-area" aria-hidden="true">
+    <div id="result-cards-arrows">
+        <button class="arrow-btn" id="result-arrow-left" aria-label="Anterior" type="button">
+            <svg viewBox="0 0 24 24"><polyline points="15 6 9 12 15 18"/></svg>
+        </button>
+        <button class="arrow-btn" id="result-arrow-right" aria-label="Siguiente" type="button">
+            <svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+    </div>
+    <div id="result-cards-strip">
+        <div id="result-cards-track"></div>
     </div>
 </div>
 
@@ -699,8 +1017,9 @@ html, body {
     · <a href="https://maplibre.org/" target="_blank">MapLibre</a>
 </div>
 
+<div id="scroll-spacer"></div>
+
 <script>
-    // ---------------- Workshops de ejemplo ----------------
     const workshops = [
         {
             tag: 'Photography',
@@ -749,12 +1068,6 @@ html, body {
         }
     ];
 
-    // ---------------- Templates para resultados de búsqueda ----------------
-    //  Cuando el usuario busca una ciudad, las cards se re-renderizan
-    //  con 7 resultados "de esa ciudad" (los 5 que ya estaban + 2 más
-    //  que se agregan a la derecha y se cortan si no entran en el viewport).
-    //  Cada template define la categoría/precio/imagen y se completa con
-    //  el nombre de la ciudad consultada.
     const SEARCH_CARD_TEMPLATES = [
         { tag: 'Photography',  titleSuffix: ' Streets & Skylines',   date: 'Mar 15 – 22, 2026', price: '$2,890', image: 'https://images.unsplash.com/photo-1480796927426-f609979314bd?w=600&q=80' },
         { tag: 'Culinary',     titleSuffix: ' Food & Markets',       date: 'May 5 – 11, 2026',  price: '$1,420', image: 'https://images.unsplash.com/photo-1539711757989-04ae22d9c34f?w=600&q=80' },
@@ -765,11 +1078,6 @@ html, body {
         { tag: 'Art',          titleSuffix: ' Galleries & Museums',  date: 'Oct 18 – 24, 2026', price: '$2,180', image: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=600&q=80' }
     ];
 
-    // ---------------- Helpers de render de cards ----------------
-    //  El carrusel siempre es infinito: en cada renderCards(...) duplicamos
-    //  el set para que al cruzar `stripSingleSetWidth` con el offset, el
-    //  wrap sea visualmente imperceptible (el set 1 y el set 2 son idénticos
-    //  y están exactamente a `stripSingleSetWidth` de distancia).
     const cardsStrip = document.getElementById('cards-strip');
     const cardsArea  = document.getElementById('cards-area');
     const cardsTrack = document.getElementById('cards-track');
@@ -787,12 +1095,6 @@ html, body {
         }));
     }
 
-    /**
-     * Genera N cards aleatorias mezclando templates con ciudades distintas.
-     * Es el set de "ejemplo" que llena el carrusel al abrir la página y al
-     * cerrar un resultado. Usamos ciudades aleatorias evitando repetir hasta
-     * agotar el catálogo (luego rota), para que cada card sea diferente.
-     */
     function buildRandomCards(count) {
         const out = [];
         const used = new Set();
@@ -826,9 +1128,8 @@ html, body {
     let stripCardsCount    = 0;
     let stripSingleSetWidth = 0;
 
-    function renderCards(cards) {
-        stripCardsCount = cards.length;
-        const cardHtml = w => `
+    function buildCardHtml(w) {
+        return `
             <article class="workshop-card" data-city="${w.city}">
                 <div class="cover" style="background-image:url('${w.image}')">
                     <span class="tag">${w.tag}</span>
@@ -847,71 +1148,119 @@ html, body {
                     </div>
                 </div>
             </article>`;
-        const setHtml = cards.map(cardHtml).join('');
-        // Duplicamos el set para que el wrap (offset -= setWidth) no se vea.
-        cardsTrack.innerHTML = setHtml + setHtml;
+    }
 
-        // Reset del transporte
+    function buildResultCardHtml(w) {
+        return `
+            <article class="result-card" data-city="${w.city}">
+                <div class="result-card-image" style="background-image:url('${w.image}')">
+                    <span class="result-card-tag">${w.tag}</span>
+                    <div class="result-card-overlay">
+                        <h3 class="result-card-title">${w.title}</h3>
+                        <p class="result-card-meta">${w.location}</p>
+                        <div class="result-card-price">${w.price}</div>
+                    </div>
+                </div>
+            </article>`;
+    }
+
+    function renderCards(cards) {
+        stripCardsCount = cards.length;
+        const setHtml = cards.map(buildCardHtml).join('');
+        cardsTrack.innerHTML = setHtml + setHtml;
         stripOffset = 0;
         stripVelocity = STRIP_AUTO_SPEED;
         cardsTrack.style.transform = 'translate3d(0, 0, 0)';
-
-        // El ancho exacto depende del CSS aplicado, así que medimos en el
-        // siguiente frame.
         requestAnimationFrame(updateStripLayout);
     }
 
-    /**
-     * Calcula `stripSingleSetWidth` = ancho de un set de cards (sin duplicar)
-     * incluyendo el gap entre cards y el gap "puente" hacia el siguiente set.
-     * Con eso el wrap del offset es visualmente seamless.
-     */
     function updateStripLayout() {
         const isMobile  = window.innerWidth <= 900;
-        // Estos valores DEBEN coincidir con el CSS:
-        //   .workshop-card { flex-basis: ... }  +  #cards-track { gap: ... }
         const cardWidth = isMobile ? 275 : 352;
         const gap       = 32;
         stripSingleSetWidth = stripCardsCount * (cardWidth + gap);
     }
 
-    // En resize sólo recalculamos el ancho de un set (las cards reflowan solas).
+    const RESULT_VISIBLE_COUNT = 2;
+    const resultCardsArea   = document.getElementById('result-cards-area');
+    const resultCardsTrack  = document.getElementById('result-cards-track');
+    const resultArrowLeft   = document.getElementById('result-arrow-left');
+    const resultArrowRight  = document.getElementById('result-arrow-right');
+
+    let resultViewActive = false;
+    let resultCardsList  = [];
+    let resultPageIndex  = 0;
+
+    function getResultCardMetrics() {
+        const w = window.innerWidth;
+        if (w <= 720) return { cardWidth: 140, gap: 14 };
+        if (w <= 900) return { cardWidth: 148, gap: 16 };
+        return { cardWidth: 168, gap: 20 };
+    }
+
+    function getResultStepPx() {
+        const { cardWidth, gap } = getResultCardMetrics();
+        return cardWidth + gap;
+    }
+
+    function getResultMaxPageIndex() {
+        return Math.max(0, resultCardsList.length - RESULT_VISIBLE_COUNT);
+    }
+
+    function updateResultCarouselUI() {
+        const step = getResultStepPx();
+        resultCardsTrack.style.transform = `translate3d(${-resultPageIndex * step}px, 0, 0)`;
+        resultArrowLeft.disabled  = resultPageIndex <= 0;
+        resultArrowRight.disabled = resultPageIndex >= getResultMaxPageIndex();
+    }
+
+    function setResultViewActive(active) {
+        resultViewActive = active;
+        if (!active) {
+            resultCardsList = [];
+            resultPageIndex = 0;
+            resultCardsTrack.innerHTML = '';
+        }
+        snapVisualScrollToReal();
+    }
+
+    function renderResultCards(cards) {
+        resultCardsList = cards;
+        resultPageIndex = 0;
+        resultCardsTrack.innerHTML = cards.map(buildResultCardHtml).join('');
+        setResultViewActive(true);
+        requestAnimationFrame(updateResultCarouselUI);
+    }
+
+    resultArrowLeft.addEventListener('click', () => {
+        if (resultPageIndex <= 0) return;
+        resultPageIndex--;
+        updateResultCarouselUI();
+    });
+    resultArrowRight.addEventListener('click', () => {
+        if (resultPageIndex >= getResultMaxPageIndex()) return;
+        resultPageIndex++;
+        updateResultCarouselUI();
+    });
+
     let layoutRaf = null;
     window.addEventListener('resize', () => {
+        if (resultViewActive) updateResultCarouselUI();
         if (layoutRaf) cancelAnimationFrame(layoutRaf);
         layoutRaf = requestAnimationFrame(updateStripLayout);
     });
 
-    // ---------------- Estado del carrusel ----------------
-    //  El strip se desplaza vía translateX con un único `stripOffset`
-    //  (en px). El movimiento por frame es:
-    //    stripOffset += stripVelocity * dt
-    //  Cuando NO hay drag, `stripVelocity` decae exponencialmente hacia
-    //  STRIP_AUTO_SPEED (positivo, sentido contrario a la esfera). Así un
-    //  fling del usuario o un click de flecha se funde con el auto-scroll
-    //  base sin saltos.
-    //
-    //  Dirección: la esfera gira con `center.lng -= ...` → desde el
-    //  observador, su superficie se mueve de IZQUIERDA a DERECHA. Para que
-    //  el carrusel rote en sentido contrario, las cards deben moverse de
-    //  DERECHA a IZQUIERDA, lo que corresponde a `stripOffset` creciente.
-    //  Por eso STRIP_AUTO_SPEED es positivo.
-    const STRIP_AUTO_SPEED   = 12;    // px/s, muy lento pero perceptible
-    const STRIP_INERTIA_TAU  = 0.55;  // s, decay del fling hacia el baseline
-    const STRIP_MAX_VELOCITY = 1800;  // px/s, tope tras un fling fuerte
-    const STRIP_ARROW_IMPULSE = 600;  // px/s, ~1 card por click de flecha
+    const STRIP_AUTO_SPEED   = 12;
+    const STRIP_INERTIA_TAU  = 0.55;
+    const STRIP_MAX_VELOCITY = 1800;
+    const STRIP_ARROW_IMPULSE = 600;
 
     let stripOffset   = 0;
     let stripVelocity = STRIP_AUTO_SPEED;
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-    // Cantidad de cards aleatorias que llenan el carrusel al cargar y al
-    // cerrar un resultado de búsqueda. Suficientes para que el loop sea
-    // visualmente "infinito" sin repeticiones obvias.
     const RANDOM_INITIAL_CARDS = 14;
 
-    // ---------------- Datos de ejemplo ----------------
     const cities = [
         { name: 'Buenos Aires', country: 'Argentina', coords: [-58.3816, -34.6037] },
         { name: 'Tokio',        country: 'Japón',      coords: [139.6917, 35.6895] },
@@ -939,59 +1288,12 @@ html, body {
         { name: 'Atenas',       country: 'Grecia',     coords: [23.7275, 37.9838] }
     ];
 
-    // ---------------- Mapa ----------------
     const DEFAULT_CENTER = [20, 25];
-
-    // Pose inicial: la esfera entra "grande" en el viewport (cortada arriba
-    // y abajo, como en el mockup), no se ve completa. El pitch se mantiene
-    // suave para conservar un tilt sutil sin distorsionar.
-    //
-    // Si después se necesitara afinar visualmente, las dos perillas son:
-    //   - DEFAULT_ZOOM ↑ → esfera más grande / más cortada
-    //   - #map-stage height/top → desplaza el centro vertical de la esfera
     const DEFAULT_ZOOM    = 3.87;
     const DEFAULT_PITCH   = 10;
     const DEFAULT_BEARING = 0;
-
-    // Pose al ejecutar una búsqueda: la esfera queda EXACTAMENTE igual
-    // que al cargar la página. Mismo zoom y mismo pitch que el default;
-    // lo único que cambia es el centro geográfico (corrimiento al sur
-    // del marcador) para que la ciudad aterrice arriba de la esfera.
     const RESULT_ZOOM     = DEFAULT_ZOOM;
     const RESULT_PITCH    = DEFAULT_PITCH;
-
-    // ---------------- Posicionamiento del resultado ----------------
-    //
-    //  Cuando el usuario busca una ciudad, queremos que SIEMPRE termine
-    //  en el mismo lugar de la pantalla — sin importar si es Berlín,
-    //  Buenos Aires, Reikiavik, Sídney o El Cairo. Y con la esfera
-    //  exactamente del mismo tamaño y en la misma posición que al cargar.
-    //
-    //  El truco: usar un offset ANGULAR en grados de latitud — el centro
-    //  de la cámara se ubica `CITY_LATITUDE_OFFSET` grados al SUR de la
-    //  ciudad. En proyección globo (que MapLibre maneja con un proyector
-    //  cercano al ortográfico), una diferencia angular fija entre dos
-    //  latitudes se traduce SIEMPRE a la misma distancia en pantalla —
-    //  independientemente de si la ciudad está en el norte o el sur, en
-    //  el ecuador o cerca de los polos.
-    //
-    //  ¿Por qué no calcular el centro con unproject sobre el píxel
-    //  destino del viewport (más "exacto" en teoría)?
-    //    Probado y descartado: para ciudades suficientemente lejanas del
-    //    centro por defecto (caso típico Buenos Aires), el "píxel espejo"
-    //    que necesitamos unprojectar cae FUERA de la silueta visible del
-    //    globo, en el espacio negro alrededor. MapLibre en ese caso
-    //    devuelve coordenadas basura cerca de un polo — el cálculo pasa
-    //    cualquier validación numérica pero geográficamente es inútil, y
-    //    la cámara termina apuntando al polo sur (o un punto raro), con
-    //    la esfera viéndose completamente distinta. El offset angular
-    //    fijo evita ese problema por completo: no depende de la geometría
-    //    visible del canvas, sólo del modelo angular del globo.
-    //
-    //  Perilla:
-    //    ↑ valor mayor → marcador más cerca del borde superior
-    //    ↓ valor menor → marcador más cerca del centro de la esfera
-    //  Depende del zoom: si subís RESULT_ZOOM, bajalo (y viceversa).
     const CITY_LATITUDE_OFFSET = 15;
 
     const map = new maplibregl.Map({
@@ -1002,53 +1304,23 @@ html, body {
         pitch: DEFAULT_PITCH,
         bearing: DEFAULT_BEARING,
         attributionControl: false,
-        // Zoom de usuario completamente bloqueado: ni rueda, ni doble click,
-        // ni shift+drag, ni pinch en touch. El zoom sólo lo controla el
-        // código (flyTo al buscar, easeTo al volver al globo). Así la esfera
-        // siempre se ve al mismo tamaño en la pose por defecto.
         scrollZoom: false,
         doubleClickZoom: false,
         boxZoom: false,
         touchZoomRotate: false,
-        // Desactivamos la inercia nativa de MapLibre para que NO compita
-        // con nuestra propia inercia (la que se funde con el autorotate).
         dragPan: { deceleration: 99999 }
     });
 
-    // La esfera no muestra NINGÚN texto del estilo (ni países, ni ciudades,
-    // ni calles, ni POIs). El único texto que aparece es el marcador
-    // dinámico que renderizamos al buscar una ciudad (city + country).
-
-    // ============================================================
-    //  Cálculo del centro de cámara para una búsqueda
-    // ============================================================
-    //  Dado un `target` (lng, lat), devuelve el centro de cámara que hay
-    //  que pasar al easeTo para que el target aterrice en el "tope" de la
-    //  esfera (~11% desde arriba en el viewport, calibrado con el zoom y
-    //  pitch por defecto).
-    //
-    //  Es deliberadamente simple: offset angular en latitud. Sin unproject,
-    //  sin estados temporales, sin dependencia de la geometría visible del
-    //  canvas. En proyección globo, este offset SIEMPRE se traduce a la
-    //  misma distancia en pantalla para cualquier ciudad — Berlín y
-    //  Buenos Aires aterrizan en el mismo Y.
-    //
-    //  Si más adelante se cambia RESULT_ZOOM o se quiere otra posición
-    //  en el viewport, sólo se toca `CITY_LATITUDE_OFFSET`.
     function computeResultCenterForTarget(target) {
         return [target[0], target[1] - CITY_LATITUDE_OFFSET];
     }
 
     map.on('load', () => {
         map.setProjection({ type: 'globe' });
-
-        // Ocultamos TODAS las capas de tipo symbol del estilo,
-        // permanentemente — no se re-muestran a ningún zoom.
         map.getStyle().layers
             .filter(l => l.type === 'symbol')
             .forEach(l => map.setLayoutProperty(l.id, 'visibility', 'none'));
 
-        // Atmósfera / espacio negro
         map.setSky({
             'sky-color': '#000000',
             'horizon-color': '#0a0a18',
@@ -1060,38 +1332,16 @@ html, body {
         });
     });
 
-    // ============================================================
-    //  Rotación + inercia
-    // ============================================================
-    //  Reglas de negocio:
-    //  • La esfera SIEMPRE está rotando salvo que el usuario esté
-    //    arrastrando, que haya una ciudad enfocada (RESULT_ZOOM, búsqueda
-    //    activa) o que esté corriendo una animación programada. Como el
-    //    zoom del usuario está deshabilitado, no necesitamos un umbral
-    //    por nivel de zoom: el spin no se detiene "por estar cerca".
-    //  • La inercia de un "fling" del mouse se funde directamente en la
-    //    velocidad del autorotate, que luego decae suavemente a la
-    //    velocidad elegida en el slider. No hay pausas ni delays.
-    // ------------------------------------------------------------
-
-    // Velocidad máxima permitida tras un fling muy fuerte (°/s).
     const MAX_SPIN = 240;
-
-    // Tiempo característico (s) con el que `currentSpinSpeed` decae
-    // exponencialmente hacia `degreesPerSecond`. Mayor = la inercia del
-    // fling se siente más larga.
     const INERTIA_TAU = 2.5;
 
-    // Estado
-    let degreesPerSecond  = 6;                  // velocidad "deseada" (slider)
-    let currentSpinSpeed  = degreesPerSecond;   // velocidad actual (mutada por el fling)
-    let spinning          = true;               // botón pausar/reanudar global
+    let degreesPerSecond  = 6;
+    let currentSpinSpeed  = degreesPerSecond;
+    let spinning          = true;
     let lastFrameTs       = null;
+    let userDragging      = false;
+    let mapAnimating      = false;
 
-    let userDragging      = false;              // mouse o dedo apretado/arrastrando
-    let mapAnimating      = false;              // hay un flyTo/easeTo en curso
-
-    // ---- Captura de velocidad mientras arrastra ----
     let lastDragLng = null;
     let lastDragTs = null;
     let velocitySamples = [];
@@ -1107,6 +1357,7 @@ html, body {
 
     function startDrag() {
         userDragging = true;
+        currentSpinSpeed = 0;
         lastDragLng = map.getCenter().lng;
         lastDragTs = performance.now();
         velocitySamples = [];
@@ -1116,10 +1367,6 @@ html, body {
         userDragging = false;
         const v = avgVelocity();
         if (Math.abs(v) > 0.5) {
-            // El usuario lanzó el globo. Su velocidad angular pasa a ser la
-            // velocidad del autorotate, que luego decae al valor por defecto.
-            // Signo invertido: nuestro autorotate hace center.lng -= speed * dt,
-            // así que un fling que aumenta lng requiere speed negativa.
             currentSpinSpeed = -v;
             currentSpinSpeed = Math.max(-MAX_SPIN, Math.min(MAX_SPIN, currentSpinSpeed));
         }
@@ -1149,27 +1396,12 @@ html, body {
         lastDragTs = now;
     });
 
-    // ------------------------------------------------------------
-    //  Zoom con la rueda SÓLO si se aprieta Ctrl (Win/Linux) o Cmd (Mac)
-    // ------------------------------------------------------------
-    //  En la config del Map dejamos `scrollZoom: false`, así que la rueda
-    //  sin modificador no hace nada. Acá registramos un listener nativo
-    //  que actúa únicamente cuando el usuario tiene Ctrl o Cmd apretado.
-    //  Bonus: el pinch del trackpad de Mac también dispara wheel events
-    //  con ctrlKey=true (lo simula el navegador), así que el gesto de
-    //  pellizco también hace zoom — esperable.
-    //
-    //  preventDefault() es importante: en Chrome/Edge, Ctrl+wheel hace
-    //  "zoom de página" por defecto; lo cancelamos para que el efecto
-    //  sólo sea sobre el mapa.
-    const ZOOM_WHEEL_SENSITIVITY = 0.0025;   // px de deltaY → unidades de zoom
-    const ZOOM_EASE_DURATION_MS  = 120;      // animación corta tras cada tick
+    const ZOOM_WHEEL_SENSITIVITY = 0.0025;
+    const ZOOM_EASE_DURATION_MS  = 120;
     map.getCanvasContainer().addEventListener('wheel', (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
         e.stopPropagation();
-        // deltaY > 0 ⇒ rueda hacia abajo / pinch-out ⇒ alejar (zoom out).
-        // deltaY < 0 ⇒ rueda hacia arriba / pinch-in  ⇒ acercar (zoom in).
         const dz = -e.deltaY * ZOOM_WHEEL_SENSITIVITY;
         map.easeTo({
             zoom: map.getZoom() + dz,
@@ -1178,13 +1410,157 @@ html, body {
         });
     }, { passive: false });
 
-    /**
-     * Decide si el auto-giro está permitido en este frame.
-     * Se pausa si el usuario está interactuando, si hay una ciudad enfocada,
-     * o si hay una animación programada en curso. Sin restricción de zoom:
-     * el zoom del usuario está deshabilitado y el del programa (flyTo a una
-     * ciudad) ya está cubierto por `activeResult`/`mapAnimating`.
-     */
+    // ---------------- PARALLAX DRIVEN SCROLL ----------------
+    // 1 = velocidad normal · 0.5 = mitad de velocidad (2× más scroll / rueda)
+
+    const SCROLL_VISUAL_EASE = 0.12; // más bajo = más suave (0.08–0.15)
+    let visualScrollY = window.scrollY || 0;
+    
+    const SCROLL_ANIM_SPEED           = 0.5;
+    const POST_CARDS_EXIT_SCROLL_PX   = 800 / SCROLL_ANIM_SPEED;
+    const SPHERE_BONUS_GROW_SCROLL_PX = 400 / SCROLL_ANIM_SPEED;
+    const SPHERE_BONUS_SCALE          = 0.7;
+    const SPHERE_FINAL_OFFSET_X_VW = 22;
+    const SPHERE_FINAL_OFFSET_Y_VH = -24;
+    const SPHERE_FINAL_SCALE       = 0.45;
+    const SPHERE_INITIAL_ZOOM      = DEFAULT_ZOOM;
+    const SPHERE_FINAL_ZOOM        = 2.40;
+    const CARDS_PARALLAX       = 0.5 * SCROLL_ANIM_SPEED;
+    const HOME_PARALLAX        = 0.85 * SCROLL_ANIM_SPEED;
+    const FILTER_PE_THRESHOLD  = 0.05;
+    const HEADER_SCROLL_PX = 70;
+
+    const mapStageEl     = document.getElementById('map-stage');
+    const headerEl       = document.querySelector('.header');
+    const heroEl         = document.getElementById('hero-tagline');
+    const homeHeroEl     = document.getElementById('home-hero-container');
+    const searchWrapEl   = document.getElementById('search-wrap');
+    const cardsAreaEl    = document.getElementById('cards-area');
+    const filterPanelEl  = document.getElementById('filter-panel');
+    const scrollSpacer   = document.getElementById('scroll-spacer');
+
+    function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+    function getCardsLayout(vh) {
+        const isMobile = window.innerWidth <= 900;
+        const areaHeight = (42 + 14) + (isMobile ? 396 : 455);
+        const bottomFraction = isMobile ? 0.05 : 0.06;
+        const topAtZero = vh * (1 - bottomFraction) - areaHeight;
+        return { areaHeight, topAtZero };
+    }
+
+    function getCardsStartExitScrollY(vh) {
+        const { topAtZero } = getCardsLayout(vh);
+        if (topAtZero <= 0) return 1;
+        return topAtZero / CARDS_PARALLAX;
+    }
+
+    function getCardsFullExitScrollY(vh) {
+        const { areaHeight, topAtZero } = getCardsLayout(vh);
+        const bottomAtZero = topAtZero + areaHeight;
+        if (bottomAtZero <= 0) return 0;
+        return bottomAtZero / CARDS_PARALLAX;
+    }
+
+    function getScrollPhaseBounds(vh) {
+        const cardsStartY = getCardsStartExitScrollY(vh);
+        const cardsFullY  = getCardsFullExitScrollY(vh);
+        const pinnedSpan  = Math.max(cardsFullY - cardsStartY, 1);
+        const sphereEndY  = cardsStartY + 0.5 * pinnedSpan;
+        const growEndY    = sphereEndY + SPHERE_BONUS_GROW_SCROLL_PX;
+        const postExitStartY = growEndY;
+        const maxScrollY  = postExitStartY + POST_CARDS_EXIT_SCROLL_PX;
+        return { cardsStartY, cardsFullY, pinnedSpan, sphereEndY, growEndY, postExitStartY, maxScrollY };
+    }
+
+    function getMaxScrollY(vh) {
+        return getScrollPhaseBounds(vh).maxScrollY;
+    }
+
+    function updateScrollLayout() {
+        const vh = window.innerHeight;
+        const h  = getMaxScrollY(vh) + vh;
+        scrollSpacer.style.height = h + 'px';
+    }
+
+    function applyScrollEffects(yVisual, yReal) {
+        const realY = yReal ?? (window.scrollY || window.pageYOffset || 0);
+        const visualY = yVisual ?? realY;
+        const vh = window.innerHeight;
+        const vw = window.innerWidth;
+
+        const { cardsStartY, pinnedSpan, sphereEndY, growEndY } = getScrollPhaseBounds(vh);
+
+        const t1 = clamp01(sphereEndY > 0 ? visualY / sphereEndY : 1);
+        const t2 = clamp01((realY - cardsStartY) / pinnedSpan);
+        const tGrow = clamp01((visualY - sphereEndY) / SPHERE_BONUS_GROW_SCROLL_PX);
+
+        const sphereTx    = t1 * vw * (SPHERE_FINAL_OFFSET_X_VW / 100);
+        const sphereTy    = t1 * vh * (SPHERE_FINAL_OFFSET_Y_VH / 100);
+        const animScale   = 1 + t1 * (SPHERE_FINAL_SCALE - 1);
+        const sphereScale = animScale * (1 + SPHERE_BONUS_SCALE * tGrow);
+
+        const postExitDeltaVisual = Math.max(0, Math.min(visualY - growEndY, POST_CARDS_EXIT_SCROLL_PX));
+        const postExitTyVisual    = -postExitDeltaVisual;
+        const postExitDeltaReal   = Math.max(0, Math.min(realY - growEndY, POST_CARDS_EXIT_SCROLL_PX));
+        const postExitTyReal      = -postExitDeltaReal;
+
+        mapStageEl.style.setProperty('--sphere-tx',    sphereTx.toFixed(2)                         + 'px');
+        mapStageEl.style.setProperty('--sphere-ty',    (sphereTy + postExitTyVisual).toFixed(2)   + 'px');
+        mapStageEl.style.setProperty('--sphere-scale', sphereScale.toFixed(4));
+
+        if (headerEl) {
+            if (realY >= HEADER_SCROLL_PX) headerEl.classList.add('is-scrolled');
+            else                           headerEl.classList.remove('is-scrolled');
+        }
+
+        const homeUiOp = clamp01(1 - t1);
+        if (homeHeroEl) {
+            homeHeroEl.style.setProperty('--home-opacity',    homeUiOp.toFixed(4));
+            homeHeroEl.style.setProperty('--scroll-offset',   (-realY * HOME_PARALLAX).toFixed(2) + 'px');
+            homeHeroEl.style.pointerEvents = homeUiOp > 0.05 ? 'auto' : 'none';
+        }
+
+        cardsAreaEl.style.setProperty('--scroll-offset', (-realY * CARDS_PARALLAX).toFixed(2) + 'px');
+
+        filterPanelEl.style.setProperty('--filter-opacity', t2.toFixed(4));
+        filterPanelEl.style.setProperty('--scroll-offset',  postExitTyReal.toFixed(2) + 'px');
+        if (t2 > FILTER_PE_THRESHOLD) filterPanelEl.classList.add('is-active');
+        else                          filterPanelEl.classList.remove('is-active');
+
+        const resultOp = resultViewActive ? t2 : 0;
+        resultCardsArea.style.setProperty('--result-opacity', resultOp.toFixed(4));
+        resultCardsArea.style.setProperty('--scroll-offset',  postExitTyReal.toFixed(2) + 'px');
+        resultCardsArea.setAttribute('aria-hidden', resultOp > FILTER_PE_THRESHOLD ? 'false' : 'true');
+        resultCardsArea.classList.toggle('is-interactive', resultOp > FILTER_PE_THRESHOLD);
+
+        if (!mapAnimating && !userDragging) {
+            const zoom = SPHERE_INITIAL_ZOOM + (SPHERE_FINAL_ZOOM - SPHERE_INITIAL_ZOOM) * t1;
+            if (Math.abs(map.getZoom() - zoom) > 0.001) {
+                map.setZoom(zoom);
+            }
+        }
+    }
+
+    function snapVisualScrollToReal() {
+        const realY = window.scrollY || window.pageYOffset || 0;
+        visualScrollY = realY;
+        applyScrollEffects(visualScrollY, realY);
+    }
+
+    function scrollToTarget(y, smooth) {
+        const clamped = Math.max(0, Math.min(y, getMaxScrollY(window.innerHeight)));
+        window.scrollTo({ top: clamped, behavior: smooth ? 'smooth' : 'instant' });
+    }
+
+    window.addEventListener('resize', () => {
+        updateScrollLayout();
+        snapVisualScrollToReal();
+    });
+
+    updateScrollLayout();
+    snapVisualScrollToReal();
+
     function isAutoSpinAllowed() {
         if (!spinning)          return false;
         if (userDragging)       return false;
@@ -1194,13 +1570,15 @@ html, body {
     }
 
     function frame(ts) {
+        const realY = window.scrollY || window.pageYOffset || 0;
+        visualScrollY += (realY - visualScrollY) * SCROLL_VISUAL_EASE;
+        applyScrollEffects(visualScrollY, realY);
+
         if (lastFrameTs === null) lastFrameTs = ts;
         const dt = (ts - lastFrameTs) / 1000;
         lastFrameTs = ts;
 
         if (isAutoSpinAllowed()) {
-            // Decaimiento exponencial de la velocidad del fling
-            // hacia la velocidad elegida en el slider.
             const k = Math.min(1, dt / INERTIA_TAU);
             currentSpinSpeed += (degreesPerSecond - currentSpinSpeed) * k;
 
@@ -1209,18 +1587,11 @@ html, body {
             map.jumpTo({ center });
         }
 
-        // ---------------- Strip: auto-scroll + inercia post-fling ----------------
-        //  Mientras NO se está arrastrando, la velocidad del strip se mueve
-        //  exponencialmente hacia STRIP_AUTO_SPEED. Si el usuario lanzó un
-        //  fling, su velocidad inicial es alta y va decayendo al baseline,
-        //  fundiendo el "tirón" con el auto-rotación contraria a la esfera.
         if (!cardDragActive) {
             const ks = Math.min(1, dt / STRIP_INERTIA_TAU);
             stripVelocity += (STRIP_AUTO_SPEED - stripVelocity) * ks;
             stripOffset   += stripVelocity * dt;
         }
-        // Wrap infinito del offset: como duplicamos el set, restar/sumar el
-        // ancho de un set deja la imagen idéntica → no se nota el salto.
         if (stripSingleSetWidth > 0) {
             while (stripOffset >= stripSingleSetWidth) stripOffset -= stripSingleSetWidth;
             while (stripOffset < 0)                    stripOffset += stripSingleSetWidth;
@@ -1231,150 +1602,137 @@ html, body {
     }
     requestAnimationFrame(frame);
 
-    // ---------------- Búsqueda ----------------
-    const input        = document.getElementById('search');
-    const suggestions  = document.getElementById('suggestions');
-    const toggleBtn    = document.getElementById('toggle');
-    const clearBtn     = document.getElementById('clear');
-    const speedInput   = document.getElementById('speed');
+    const input              = document.getElementById('search');
+    const filterInput        = document.querySelector('.filter-search');
+    const suggestions        = document.getElementById('suggestions');
+    const filterSuggestions  = document.getElementById('filter-suggestions');
+    const toggleBtn          = document.getElementById('toggle');
+    const clearBtn           = document.getElementById('clear');
+    const speedInput         = document.getElementById('speed');
 
-    let activeIndex = -1;
-    let activeResult = null;     // { glowMarker, labelMarker, city }
+    let activeResult = null;
 
-    function renderSuggestions(q) {
-        if (!q) { suggestions.style.display = 'none'; return; }
+    function getSearchTargetScrollY() {
+        return getCardsFullExitScrollY(window.innerHeight);
+    }
+
+    function hideAllSuggestions() {
+        suggestions.style.display = 'none';
+        filterSuggestions.style.display = 'none';
+    }
+
+    function clearMarkersOnly() {
+        if (!activeResult) return;
+        activeResult.glowMarker?.remove();
+        activeResult.labelMarker?.remove();
+        activeResult = null;
+    }
+
+    function renderSuggestionsFor(q, listEl, activeIndex) {
+        if (!q) { listEl.style.display = 'none'; return activeIndex; }
         const norm = q.toLowerCase().trim();
         const matches = cities
             .filter(c => c.name.toLowerCase().includes(norm))
             .slice(0, 8);
-        if (!matches.length) { suggestions.style.display = 'none'; return; }
-        suggestions.innerHTML = matches.map((c, i) => `
+        if (!matches.length) { listEl.style.display = 'none'; return activeIndex; }
+        listEl.innerHTML = matches.map((c, i) => `
             <div class="suggestion ${i === activeIndex ? 'active' : ''}" data-name="${c.name}">
                 <span>${c.name}</span>
                 <span class="country">${c.country}</span>
             </div>
         `).join('');
-        suggestions.style.display = 'block';
+        listEl.style.display = 'block';
+        return activeIndex;
     }
 
-    input.addEventListener('input', () => {
-        activeIndex = -1;
-        renderSuggestions(input.value);
-    });
+    function resolveChosenCityName(inputEl, listEl, activeIndex) {
+        const items = listEl.querySelectorAll('.suggestion');
+        return items[activeIndex]?.dataset.name
+            || items[0]?.dataset.name
+            || cities.find(c => c.name.toLowerCase() === inputEl.value.toLowerCase().trim())?.name;
+    }
 
-    input.addEventListener('keydown', (e) => {
-        const items = suggestions.querySelectorAll('.suggestion');
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            activeIndex = Math.min(activeIndex + 1, items.length - 1);
-            renderSuggestions(input.value);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            activeIndex = Math.max(activeIndex - 1, 0);
-            renderSuggestions(input.value);
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            const chosenName = items[activeIndex]?.dataset.name
-                || items[0]?.dataset.name
-                || cities.find(c => c.name.toLowerCase() === input.value.toLowerCase().trim())?.name;
-            if (chosenName) selectCity(chosenName);
-        } else if (e.key === 'Escape') {
-            clearResult();
-        }
-    });
+    function attachSearchInput(inputEl, listEl, source) {
+        let activeIndex = -1;
 
-    suggestions.addEventListener('click', (e) => {
-        const item = e.target.closest('.suggestion');
-        if (item) selectCity(item.dataset.name);
-    });
+        inputEl.addEventListener('input', () => {
+            if (source === 'filter' && !inputEl.value.trim() && activeResult) {
+                clearResult('marker-only');
+                return;
+            }
+            activeIndex = -1;
+            activeIndex = renderSuggestionsFor(inputEl.value, listEl, activeIndex);
+        });
+
+        inputEl.addEventListener('keydown', (e) => {
+            const items = listEl.querySelectorAll('.suggestion');
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = Math.min(activeIndex + 1, Math.max(items.length - 1, 0));
+                renderSuggestionsFor(inputEl.value, listEl, activeIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = Math.max(activeIndex - 1, 0);
+                renderSuggestionsFor(inputEl.value, listEl, activeIndex);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const chosenName = resolveChosenCityName(inputEl, listEl, activeIndex);
+                if (chosenName) selectCity(chosenName, { source });
+            } else if (e.key === 'Escape') {
+                clearResult(source === 'main' ? 'full' : 'marker-only');
+            }
+        });
+
+        listEl.addEventListener('click', (e) => {
+            const item = e.target.closest('.suggestion');
+            if (item) selectCity(item.dataset.name, { source });
+        });
+    }
+
+    attachSearchInput(input, suggestions, 'main');
+    attachSearchInput(filterInput, filterSuggestions, 'filter');
 
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#search-wrap')) suggestions.style.display = 'none';
+        if (!e.target.closest('#home-hero-container')) suggestions.style.display = 'none';
+        if (!e.target.closest('.filter-search-wrap')) filterSuggestions.style.display = 'none';
     });
 
-    // ---------------- Resultado: rotación + luz + label ----------------
-    //
-    //  La búsqueda hace un `easeTo` (NO un flyTo): misma pose visual que
-    //  el estado por defecto — mismo zoom y mismo pitch — y la cámara
-    //  rota suavemente hasta una coordenada calculada para que la ciudad
-    //  aterrice SIEMPRE en el mismo punto de la pantalla. Como zoom y
-    //  pitch finales son IGUALES a los actuales, easeTo los mantiene
-    //  constantes durante toda la animación: la esfera ni se achica ni
-    //  se agranda ni se desplaza — sólo rota para mostrar la ciudad
-    //  arriba. Que es exactamente lo que se ve al cargar la página,
-    //  apenas con otro contenido visible.
-    //
-    //  El cálculo del centro se delega a `computeResultCenterForTarget`,
-    //  que devuelve `[target_lng, target_lat - CITY_LATITUDE_OFFSET]`:
-    //  un offset angular en latitud que en globo se traduce a una
-    //  distancia constante en pantalla para cualquier ciudad.
-    //
-    //  Ver constantes: CITY_LATITUDE_OFFSET, RESULT_ZOOM, RESULT_PITCH.
-
-    function selectCity(name) {
+    function selectCity(name, { source = 'main' } = {}) {
         const city = cities.find(c => c.name === name);
         if (!city) return;
 
-        input.value = city.name;
-        suggestions.style.display = 'none';
+        if (source === 'main') input.value = city.name;
+        else                    filterInput.value = city.name;
+        hideAllSuggestions();
 
-        // Pequeño offset aleatorio para que NO sea exactamente la coord oficial
         const jitter = () => (Math.random() - 0.5) * 0.6;
         const target = [city.coords[0] + jitter(), city.coords[1] + jitter()];
 
-        clearResult(false);  // limpio el anterior sin reanudar giro
+        clearMarkersOnly();
 
-        activeResult = { city, target };
+        if (source === 'main') {
+            scrollToTarget(getSearchTargetScrollY(), true);
+        }
 
-        // Re-renderizamos el strip con 7 cards "de esta ciudad"
-        // (los 5 originales + 2 más, que se desbordan a la derecha
-        // si no entran en el viewport).
-        renderCards(buildCardsForCity(city.name));
+        activeResult = { city, target, source };
+        renderResultCards(buildCardsForCity(city.name));
 
-        // Bearing fijo en 0 (norte arriba) para garantizar que la ciudad
-        // quede HORIZONTALMENTE CENTRADA. Si rotáramos el bearing, el
-        // marcador se desplazaría hacia los lados.
         const bearing = 0;
-
-        // El marcador (`target`) se queda en su coordenada real. El
-        // CENTRO del mapa se calcula con un offset angular en latitud
-        // (ver `computeResultCenterForTarget`), que en proyección globo
-        // se traduce a una distancia consistente en pantalla para
-        // CUALQUIER ciudad — sin importar latitud (norte/sur/cerca de
-        // polos) ni la geometría visible del canvas.
         const mapCenter = computeResultCenterForTarget(target);
 
         mapAnimating = true;
-        // ¿Por qué easeTo y no flyTo?
-        //   flyTo simula un "vuelo de avión": durante el medio del trayecto
-        //   sube el camera por encima del globo (zoom out) y después
-        //   desciende al destino (zoom in). Para una ciudad cercana al
-        //   centro por defecto (ej. Berlín) eso casi no se nota, pero para
-        //   destinos lejanos (Buenos Aires, Sídney, etc.) la esfera se
-        //   achica drásticamente a mitad de la animación y reaparece
-        //   grande al final — daba la sensación de que "el zoom y el
-        //   tamaño cambiaban" y de que la esfera "se salía del viewport".
-        //
-        //   easeTo interpola directamente entre estado actual y destino,
-        //   sin esa "altitud intermedia". Como el zoom y el pitch finales
-        //   son los mismos que los actuales, easeTo los mantiene
-        //   CONSTANTES durante toda la animación → la esfera no cambia
-        //   de tamaño ni de posición, sólo rota para que la ciudad quede
-        //   arriba. Que es exactamente lo que se pidió.
-        //
-        //   Duración fija para que la animación se sienta igual sin
-        //   importar la distancia (cerca o lejos → mismo tiempo).
         map.easeTo({
             center: mapCenter,
-            zoom: RESULT_ZOOM,
+            zoom: SPHERE_FINAL_ZOOM,
             pitch: RESULT_PITCH,
             bearing: bearing,
-            duration: 1500,
+            duration: 2500,
             essential: true
         });
 
         map.once('moveend', () => {
             mapAnimating = false;
+            snapVisualScrollToReal();
             if (!activeResult) return;
 
             const glowEl = document.createElement('div');
@@ -1386,11 +1744,6 @@ html, body {
 
             const labelEl = document.createElement('div');
             labelEl.className = 'city-label';
-            // IMPORTANTE: la animación de fadeUp se aplica a un .city-label-inner
-            // y NO al elemento raíz del marker. MapLibre setea `transform` en la
-            // raíz para posicionarlo en lat/lng; si la keyframe también animara
-            // `transform` en la raíz, lo sobrescribiría y el label volaría al
-            // top-left del contenedor.
             labelEl.innerHTML = `
                 <div class="city-label-inner">
                     <div class="city-name">${city.name}</div>
@@ -1410,90 +1763,87 @@ html, body {
         });
     }
 
-    function clearResult(resumeSpin = true) {
-        if (activeResult) {
-            activeResult.glowMarker?.remove();
-            activeResult.labelMarker?.remove();
-            activeResult = null;
+    function clearResult(mode = 'full') {
+        if (mode === false) {
+            clearMarkersOnly();
+            return;
         }
-        if (resumeSpin) {
-            input.value = '';
-            activeIndex = -1;
-            suggestions.innerHTML = '';
-            suggestions.style.display = 'none';
-            input.blur();
 
-            // Restauramos un set aleatorio fresco para el carrusel infinito.
-            renderCards(buildRandomCards(RANDOM_INITIAL_CARDS));
+        clearMarkersOnly();
 
-            // Reset al estado inicial EXACTO con el que abre la página
+        if (mode === 'marker-only') {
+            filterInput.value = '';
+            filterSuggestions.innerHTML = '';
+            hideAllSuggestions();
+            filterInput.blur();
             currentSpinSpeed = degreesPerSecond;
-            mapAnimating = true;
-            map.easeTo({
-                center: DEFAULT_CENTER,
-                pitch: DEFAULT_PITCH,
-                bearing: DEFAULT_BEARING,
-                zoom: DEFAULT_ZOOM,
-                duration: 1800,
-                essential: true
-            });
-            map.once('moveend', () => { mapAnimating = false; });
+            return;
         }
+
+        input.value = '';
+        filterInput.value = '';
+        suggestions.innerHTML = '';
+        filterSuggestions.innerHTML = '';
+        hideAllSuggestions();
+        input.blur();
+        filterInput.blur();
+
+        setResultViewActive(false);
+        renderCards(buildRandomCards(RANDOM_INITIAL_CARDS));
+
+        scrollToTarget(0, true);
+        currentSpinSpeed = degreesPerSecond;
+        mapAnimating = true;
+        map.easeTo({
+            center: DEFAULT_CENTER,
+            pitch: DEFAULT_PITCH,
+            bearing: DEFAULT_BEARING,
+            zoom: DEFAULT_ZOOM,
+            duration: 1800,
+            essential: true
+        });
+        map.once('moveend', () => {
+            mapAnimating = false;
+            snapVisualScrollToReal();
+        });
     }
 
-    // ---------------- Botones ----------------
     toggleBtn.addEventListener('click', () => {
         spinning = !spinning;
         toggleBtn.textContent = spinning ? 'Pausar' : 'Reanudar';
     });
-    clearBtn.addEventListener('click', () => clearResult(true));
+    clearBtn.addEventListener('click', () => clearResult('full'));
     speedInput.addEventListener('input', (e) => {
         degreesPerSecond = Number(e.target.value);
     });
 
-    // ---------------- Render inicial de cards ----------------
-    //  Vista por defecto = un set de cards aleatorias suficientemente largo
-    //  para alimentar el carrusel infinito. Al buscar una ciudad,
-    //  selectCity() reemplaza el set por los resultados contextuales de esa
-    //  ciudad (también en loop). Al cerrar el resultado se vuelve a generar
-    //  un set aleatorio nuevo, así no es siempre exactamente el mismo.
     renderCards(buildRandomCards(RANDOM_INITIAL_CARDS));
 
-    // ---------------- Hero tagline (entrada letter-by-letter) ----------------
-    //  Generamos un <span> por carácter (los espacios se renderizan como
-    //  spans vacíos con clase .space para mantener el ancho). Cada span
-    //  recibe un `animation-delay` escalonado para que las letras entren
-    //  una detrás de la otra (efecto stagger). El keyframe heroLetterIn
-    //  hace el trabajo visual: opacity 0→1, blur 14px→0, scale 0.35→1
-    //  con un pequeño overshoot a 1.04 antes de aterrizar.
-    (function injectHeroTagline() {
-        const HERO_TEXT = 'Create with artist in they private studio worldwide';
-        const HERO_STAGGER_MS = 38;     // ms entre el inicio de letra y letra
-        const HERO_INITIAL_DELAY_MS = 250;
-
-        const host = document.getElementById('hero-tagline');
+    function injectLetterTagline(host, text, staggerMs, initialDelayMs) {
         if (!host) return;
-
-        const chars = Array.from(HERO_TEXT);
+        const chars = Array.from(text);
         host.innerHTML = chars.map((ch, i) => {
             const isSpace = ch === ' ';
-            const delay = (HERO_INITIAL_DELAY_MS + i * HERO_STAGGER_MS) / 1000;
+            const delay = (initialDelayMs + i * staggerMs) / 1000;
             const cls = 'hero-letter' + (isSpace ? ' space' : '');
             const content = isSpace ? '' : ch;
             return `<span class="${cls}" style="animation-delay:${delay.toFixed(3)}s">${content}</span>`;
         }).join('');
-    })();
+    }
 
-    // ---------------- Drag del strip (con inercia + elastic press/release) -------
-    //  • Al apretar: clase .dragging → el track se escala a 0.96 con easing
-    //    tipo spring (overshoot). Da la sensación elástica de "presionar".
-    //  • Al mover: se actualiza stripOffset directamente. No hay rubber
-    //    band en los bordes porque el carrusel es infinito (loop seamless).
-    //  • Al soltar: tomamos la velocidad media de las últimas muestras del
-    //    cursor y la usamos como velocidad inicial del strip (fling). El
-    //    decaimiento exponencial en frame() la lleva de vuelta al baseline.
-    //  • La clase .dragging se quita al soltar → scale vuelve a 1 con el
-    //    mismo easing spring (rebote sutil de soltar).
+    injectLetterTagline(
+        document.getElementById('hero-tagline'),
+        'Create with artists in their private studios worldwide.',
+        38,
+        250
+    );
+    injectLetterTagline(
+        document.getElementById('filter-panel-title'),
+        'Find your next studio experience',
+        32,
+        120
+    );
+
     const DRAG_CLICK_THRESHOLD = 5;
     const STRIP_DRAG_VELOCITY_SAMPLES = 5;
 
@@ -1535,7 +1885,6 @@ html, body {
         const now = performance.now();
         const dx  = e.clientX - cardDragStartX;
         if (Math.abs(dx) > DRAG_CLICK_THRESHOLD) cardDragMoved = true;
-        // Cursor a la derecha (dx > 0) ⇒ track se mueve a la derecha ⇒ offset baja.
         stripOffset = cardDragStartOffset - dx;
 
         const dxFrame = e.clientX - cardDragLastX;
@@ -1552,7 +1901,6 @@ html, body {
         if (e && e.pointerId !== undefined) {
             try { cardsStrip.releasePointerCapture(e.pointerId); } catch (_) {}
         }
-        // Convertimos px/s del cursor a px/s del offset (signo opuesto).
         const v = avgDragVelocity();
         if (Math.abs(v) > 80) {
             stripVelocity = clamp(-v, -STRIP_MAX_VELOCITY, STRIP_MAX_VELOCITY);
@@ -1564,8 +1912,6 @@ html, body {
     cardsStrip.addEventListener('pointerup', endCardDrag);
     cardsStrip.addEventListener('pointercancel', endCardDrag);
 
-    // El click se dispara en pointerup. Si hubo drag real, lo cancelamos
-    // en fase de captura para que la selección de ciudad no se ejecute.
     cardsStrip.addEventListener('click', (e) => {
         if (cardDragMoved) {
             e.preventDefault();
@@ -1576,15 +1922,9 @@ html, body {
         const card = e.target.closest('.workshop-card');
         if (!card) return;
         const cityName = card.dataset.city;
-        if (cityName) selectCity(cityName);
+        if (cityName) selectCity(cityName, { source: 'main' });
     }, true);
 
-    // ---------------- Flechas de navegación ----------------
-    //  Cada click inyecta un impulso de velocidad al strip. La inercia en
-    //  frame() lo lleva de vuelta a STRIP_AUTO_SPEED, así que el avance se
-    //  siente "soft": acelera y vuelve solo al ritmo del auto-scroll.
-    //  Con τ = STRIP_INERTIA_TAU ≈ 0.55s el desplazamiento extra ronda
-    //  (impulso - baseline) * τ ≈ 320 px ≈ una tarjeta + gap.
     const arrowLeftBtn  = document.getElementById('arrow-left');
     const arrowRightBtn = document.getElementById('arrow-right');
 
@@ -1595,7 +1935,6 @@ html, body {
         stripVelocity = STRIP_ARROW_IMPULSE;
     });
 
-    // Atribución custom: toggle del popup
     const attrBtn = document.getElementById('attr-btn');
     const attrPopup = document.getElementById('attr-popup');
     attrBtn.addEventListener('click', (e) => {
